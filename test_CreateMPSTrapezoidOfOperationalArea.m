@@ -7,9 +7,9 @@ end
 
 function testReturnsCorrectCount(testCase)
     sys = makeTestSys();
-    [g1, ~] = CreateMPSTrapezoidOfOperationalArea(10, sys, 0.5);
-    [g2, ~] = CreateMPSTrapezoidOfOperationalArea([10 20], sys, 0.5);
-    [g3, ~] = CreateMPSTrapezoidOfOperationalArea([10 20 30], sys, 0.5);
+    [g1, ~] = CreateMPSTrapezoidOfOperationalArea(10, sys, [], 0.5);
+    [g2, ~] = CreateMPSTrapezoidOfOperationalArea([10 20], sys, [], 0.5);
+    [g3, ~] = CreateMPSTrapezoidOfOperationalArea([10 20 30], sys, [], 0.5);
 
     verifyEqual(testCase, numel(g1), 1);
     verifyEqual(testCase, numel(g2), 2);
@@ -33,13 +33,13 @@ end
 
 function testRejectsInvalidLength(testCase)
     sys = makeTestSys();
-    verifyError(testCase, @() CreateMPSTrapezoidOfOperationalArea([], sys, 0.5), ...
+    verifyError(testCase, @() CreateMPSTrapezoidOfOperationalArea([], sys, [], 0.5), ...
         'CreateMPSTrapezoidOfOperationalArea:invalidLength');
 end
 
 function testZeroAreaBranch(testCase)
     sys = makeTestSys();
-    [grads, aux] = CreateMPSTrapezoidOfOperationalArea([0 0], sys, 0.5);
+    [grads, aux] = CreateMPSTrapezoidOfOperationalArea([0 0], sys, [], 0.5);
 
     verifyEqual(testCase, numel(grads), 2);
     for i = 1:2
@@ -58,7 +58,7 @@ end
 function testRampTimeRasterization(testCase)
     sys = makeTestSys();
     A = [100 50 0];
-    [~, aux] = CreateMPSTrapezoidOfOperationalArea(A, sys, 0.3);
+    [~, aux] = CreateMPSTrapezoidOfOperationalArea(A, sys, [], 0.3);
 
     % rampTime must be a multiple of gradRasterTime
     verifyEqual(testCase, mod(aux.rampTime, sys.gradRasterTime), 0, 'AbsTol', 1e-15);
@@ -83,12 +83,12 @@ function testTriangleVsTrapezoidBranches(testCase)
 
     % --- Triangle case: maxAbsArea < slopFactor*maxGrad*rampTime ---
     Atri = 0.5 * (slopFactor * sys.maxGrad * rampTime);
-    [~, auxTri] = CreateMPSTrapezoidOfOperationalArea([Atri], sys, blankSlopeRatio);
+    [~, auxTri] = CreateMPSTrapezoidOfOperationalArea([Atri], sys, [], blankSlopeRatio);
     verifyEqual(testCase, auxTri.plateauDuration, 0);
 
     % --- Trapezoid case: maxAbsArea large ---
     Atrap = 5.0 * (slopFactor * sys.maxGrad * rampTime);
-    [~, auxTrap] = CreateMPSTrapezoidOfOperationalArea([Atrap], sys, blankSlopeRatio);
+    [~, auxTrap] = CreateMPSTrapezoidOfOperationalArea([Atrap], sys, [], blankSlopeRatio);
     verifyGreaterThanOrEqual(testCase, auxTrap.plateauDuration, 0);
 end
 
@@ -98,7 +98,7 @@ function testAmplitudeMatchesDefinition(testCase)
     slopFactor = 1 - blankSlopeRatio^2;
 
     signedOperationalAreas = [120, -60, 30];
-    [grads, aux] = CreateMPSTrapezoidOfOperationalArea(signedOperationalAreas, sys, blankSlopeRatio);
+    [grads, aux] = CreateMPSTrapezoidOfOperationalArea(signedOperationalAreas, sys, [], blankSlopeRatio);
 
     % The code sets: amps = areas / effectiveDuration
     for i = 1:numel(signedOperationalAreas)
@@ -127,7 +127,7 @@ function testPlateauDurationFormulaMatchesCode(testCase)
     rampTime = ceil(rampTime/sys.gradRasterTime)*sys.gradRasterTime;
 
     % Run function
-    [~, aux] = CreateMPSTrapezoidOfOperationalArea(A, sys, blankSlopeRatio);
+    [~, aux] = CreateMPSTrapezoidOfOperationalArea(A, sys, [], blankSlopeRatio);
 
     if maxAbsArea < slopFactor*sys.maxGrad*rampTime
         plateauExpected = 0;

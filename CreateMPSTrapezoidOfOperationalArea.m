@@ -1,4 +1,4 @@
-function [gradsMPS, aux] = CreateMPSTrapezoidOfOperationalArea(signedOperationalAreas, sys, blankSlopeRatio)
+function [gradsMPS, aux] = CreateMPSTrapezoidOfOperationalArea(signedOperationalAreas, sys, slope, blankSlopeRatio)
 % CreateMPSTrapezoidOfOperationalArea
 %
 % Inputs
@@ -13,7 +13,21 @@ function [gradsMPS, aux] = CreateMPSTrapezoidOfOperationalArea(signedOperational
     if nargin < 2 || isempty(sys)
         sys = mr.opts();
     end
-    if nargin < 3 || isempty(blankSlopeRatio)
+
+    % slope 
+    % If not provided, derive something reasonable from sys.
+    % NOTE: sys.maxGrad is typically in Hz/m and sys.maxSlew in Hz/m/s in MATLAB Pulseq,
+    % so slope ~= maxGrad/maxSlew gives seconds.
+    if nargin < 3 || isempty(slope)
+        if isfield(sys,'maxGrad') && isfield(sys,'maxSlew') && sys.maxSlew > 0
+            slope = sys.maxGrad / sys.maxSlew;   % seconds
+        else
+            error('Cannot infer slope because sys.maxGrad/maxSlew is missing or invalid.');
+        end
+    end
+    slope = ceil(slope / sys.gradRasterTime) * sys.gradRasterTime;
+
+    if nargin < 4 || isempty(blankSlopeRatio)
         blankSlopeRatio = 1.0; % typical default; set to 1.0 if you want "flat-only"
     end
     blankSlopeRatio = min(max(blankSlopeRatio, 0), 1);
@@ -47,16 +61,21 @@ function [gradsMPS, aux] = CreateMPSTrapezoidOfOperationalArea(signedOperational
     minimumRampDurationMaxAmplitude = sys.maxGrad / sys.maxSlew; % seconds
     minimumRampDurationMaxAmplitude = ceil(minimumRampDurationMaxAmplitude / sys.gradRasterTime) * sys.gradRasterTime;
 
+    % if user input ramp is reasonably large enough, then use it.
+    if minimumRampDurationMaxAmplitude > slope
+        slope = minimumRampDurationMaxAmplitude;
+    end
+    
     % Determine plateauDuration based on triangle vs trapezoid condition
-    if maxAbsArea < slopFactor * sys.maxGrad * minimumRampDurationMaxAmplitude
+    if maxAbsArea < slopFactor * sys.maxGrad * slope
         plateauDuration = 0.0; % triangle
     else
-        plateauDuration = maxAbsArea / sys.maxGrad - slopFactor * minimumRampDurationMaxAmplitude;
+        plateauDuration = maxAbsArea / sys.maxGrad - slopFactor * slope;
         plateauDuration = ceil(plateauDuration / sys.gradRasterTime) * sys.gradRasterTime;
         plateauDuration = max(plateauDuration, 0);
     end
 
-    effectiveDuration = plateauDuration + slopFactor * minimumRampDurationMaxAmplitude;
+    effectiveDuration = plateauDuration + slopFactor * slope;
     if effectiveDuration <= 0
         error('effectiveDuration <= 0. Check blankSlopeRatio and system limits.');
     end
@@ -66,9 +85,9 @@ function [gradsMPS, aux] = CreateMPSTrapezoidOfOperationalArea(signedOperational
     for i = 1:n
         gradsMPS{i} = mr.makeTrapezoid(chans{i}, sys, ...
             'amplitude', amps(i), ...
-            'riseTime',  minimumRampDurationMaxAmplitude, ...
+            'riseTime',  slope, ...
             'flatTime',  plateauDuration, ...
-            'fallTime',  minimumRampDurationMaxAmplitude);
+            'fallTime',  slope);
     end
 
     aux = packAux(maxAbsArea, slopFactor, plateauDuration, minimumRampDurationMaxAmplitude, effectiveDuration, signedOperationalAreas);
