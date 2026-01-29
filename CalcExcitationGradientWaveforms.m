@@ -15,7 +15,6 @@ function [LeadRephGradsMPS, ExcitationGradsMPS, TailRephGradsMPS] = CalcExcitati
 
     if nargin < 3 || isempty(sys)
         sys = mr.opts();
-        sys.slopeRatio = 0;
     end
 
     kstart = double(kstart(:)).';   % 1x3
@@ -30,57 +29,34 @@ function [LeadRephGradsMPS, ExcitationGradsMPS, TailRephGradsMPS] = CalcExcitati
 
     % --- Excitation gradient durations/areas ---
     % Python:
-    % ExciFlatDur = 1e3 * max(|kstride|) / (maxgrad * gamma)
+    % ExciFlatDur = 1e3 * max(|kstride|) / (sys.maxGrad * gamma)
     % Interpretation: convert mm^-1 -> m^-1 by 1e3. Dur in seconds.
-    ExciFlatDur = max(abs(kstride)) / (sys.maxGrad * gamma);  % s
+    ExciFlatDur = max(abs(kstride)) / sys.maxGrad;  % s
+    ExciFlatDur = ceil(ExciFlatDur/sys.gradRasterTime) * sys.gradRasterTime;
 
     % ExciFlatArea = 1e3 * kstride / gamma  (units: T/m * s)
-    ExciFlatArea = (1e3 * kstride) / gamma;
+    ExciFlatArea = kstride;
 
     % ExciGradStr = ExciFlatArea / ExciFlatDur  (T/m)
     ExciGradStr = ExciFlatArea / ExciFlatDur;
 
-    % ExciSlopDur = max(|ExciGradStr| / maxslew)  (s)
-    ExciSlopDur = max(abs(ExciGradStr) ./ maxslew);
+    % ExciSlopDur = max(|ExciGradStr| / sys.maxSlew)  (s)
+    ExciSlopDur = max(abs(ExciGradStr) / sys.maxSlew);
+    ExciSlopDur = ceil(ExciSlopDur / sys.gradRasterTime) * sys.gradRasterTime;
 
     % ExciSlopArea = 0.5 * ExciGradStr * ExciSlopDur  (T/m*s)
     ExciSlopArea = 0.5 * ExciGradStr * ExciSlopDur;
 
-    % Reference time: your code uses axis index 1 (Python) which is MATLAB 2
-    % ref = (0 - kstart[1])/(kend[1]-kstart[1]) * ExciFlatDur + ExciSlopDur
-    if abs(kend(2) - kstart(2)) < eps
-        warning('kend(2) == kstart(2); reference time set to ExciSlopDur.');
-        ref = ExciSlopDur;
-    else
-        ref = (0.0 - kstart(2)) / (kend(2) - kstart(2)) * ExciFlatDur + ExciSlopDur;
-    end
-
     % --- Tail rephase gradient (after excitation): cancel kend and excitation ramps ---
-    TailAreaMax = max(abs(-(1e3 * kend) / gamma - ExciSlopArea));
-
-    if TailAreaMax * maxslew < maxgrad * maxgrad
-        TailSlopDur = sqrt(TailAreaMax / maxslew);
-        TailFlatDur = 0.0;
-    else
-        TailSlopDur = maxgrad / maxslew;
-        TailFlatDur = TailAreaMax / maxgrad - maxgrad / maxslew;
-    end
-
-    TailArea    = -(1e3 * kend) / gamma - ExciSlopArea;
+    TailAreaMax = max(abs(-kend - ExciSlopArea));
+    TailArea    = -kend - ExciSlopArea;
+    [TailSlopDur, TailFlatDur] = trapTimingFromArea(TailAreaMax, sys);
     TailGradStr = TailArea / (TailSlopDur + TailFlatDur);
 
     % --- Lead rephase gradient (before excitation): prewind to start kstart etc. ---
-    LeadAreaMax = max(abs((1e3 * kend) / gamma - ExciSlopArea - ExciFlatArea));
-
-    if LeadAreaMax * maxslew < maxgrad * maxgrad
-        LeadSlopDur = sqrt(LeadAreaMax / maxslew);
-        LeadFlatDur = 0.0;
-    else
-        LeadSlopDur = maxgrad / maxslew;
-        LeadFlatDur = LeadAreaMax / maxgrad - maxgrad / maxslew;
-    end
-
-    LeadArea    = (1e3 * kend) / gamma - ExciSlopArea - ExciFlatArea;
+    LeadAreaMax = max(abs(kend - ExciSlopArea - ExciFlatArea));
+    LeadArea    = kend - ExciSlopArea - ExciFlatArea;
+    [LeadSlopDur, LeadFlatDur] = trapTimingFromArea(LeadAreaMax, sys);
     LeadGradStr = LeadArea / (LeadSlopDur + LeadFlatDur);
 
     % --- Build Pulseq gradient objects for x/y/z (map M/P/S to x/y/z) ---
@@ -115,9 +91,23 @@ function [LeadRephGradsMPS, ExcitationGradsMPS, TailRephGradsMPS] = CalcExcitati
             'fallTime',  LeadSlopDur);
     end
 
-    % NOTE:
-    % Pulseq grad objects do not carry an internal "reference time" like your
-    % TrapezoidStaticAmplitude class does. To emulate your ref/ref1/ref2 timing,
-    % you typically place these grads into different blocks (mr.makeBlockPulse/seq.addBlock)
-    % with appropriate delays, or you pad with mr.makeDelay().
+end
+
+
+function [slopDur, flatDur] = trapTimingFromArea(areaMax, sys)
+    % areaMax in 1/m, sys.maxGrad in Hz/m, sys.maxSlew in Hz/m/s
+    if areaMax < eps
+        slopDur = 0; flatDur = 0; return;
+    end
+
+    if areaMax * sys.maxSlew < sys.maxGrad^2
+        slopDur = sqrt(areaMax / sys.maxSlew);
+        flatDur = 0;
+    else
+        slopDur = sys.maxGrad / sys.maxSlew;
+        flatDur = areaMax / sys.maxGrad - sys.maxGrad / sys.maxSlew;
+    end
+
+    slopDur = ceil(slopDur / sys.gradRasterTime) * sys.gradRasterTime;
+    flatDur = ceil(flatDur / sys.gradRasterTime) * sys.gradRasterTime;
 end

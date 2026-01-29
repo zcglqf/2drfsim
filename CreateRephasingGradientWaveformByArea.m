@@ -1,4 +1,4 @@
-function grads = CalcRephasingGradientWaveformByArea(mpsarea, sys, slope)
+function grads = CreateRephasingGradientWaveformByArea(mpsarea, sys, slope)
 % CalcRephasingGradientWaveformByArea
 % Calculate rephasing trapezoid gradients given per-axis areas.
 %
@@ -14,9 +14,8 @@ function grads = CalcRephasingGradientWaveformByArea(mpsarea, sys, slope)
         sys = mr.opts();
     end
     if nargin < 3 || isempty(slope)
-        slope = sys.maxGrad / sys.maxSlew;
+        slope = 0;
     end
-    slope = ceil(slope / sys.gradRasterTime) * sys.gradRasterTime;
 
     mpsarea = double(mpsarea(:)).'; % 1xN
     n = numel(mpsarea);
@@ -29,46 +28,40 @@ function grads = CalcRephasingGradientWaveformByArea(mpsarea, sys, slope)
     % Determine SlopDur and FlatDur (seconds)
     if slope == 0
         % Triangle or trapezoid with slew constraint
-        if RephAreaMax * maxslew_Tms < maxgrad_Tm * maxgrad_Tm
-            SlopDur = sqrt(RephAreaMax / maxslew_Tms);
+        if RephAreaMax * sys.maxSlew < sys.maxGrad * sys.maxGrad
+            SlopDur = sqrt(RephAreaMax / sys.maxSlew);
             FlatDur = 0.0;
         else
-            SlopDur = maxgrad_Tm / maxslew_Tms;
-            FlatDur = RephAreaMax / maxgrad_Tm - maxgrad_Tm / maxslew_Tms;
+            SlopDur = sys.maxGrad / sys.maxSlew;
+            FlatDur = RephAreaMax / sys.maxGrad - sys.maxGrad / sys.maxSlew;
         end
     else
-        ramp_s = double(slope) * 1e-3;
         % Enforce amplitude limit given fixed ramp
-        if (RephAreaMax / ramp_s) < maxgrad_Tm
-            SlopDur = ramp_s;
+        if (RephAreaMax / slope) < sys.maxGrad
+            SlopDur = slope;
             FlatDur = 0.0;
         else
-            SlopDur = ramp_s;
-            FlatDur = RephAreaMax / maxgrad_Tm - ramp_s;
+            SlopDur = slope;
+            FlatDur = RephAreaMax / sys.maxGrad - slope;
         end
     end
 
     % Rasterize times to gradRasterTime if available
-    if isfield(sys,'gradRasterTime') && ~isempty(sys.gradRasterTime) && sys.gradRasterTime > 0
-        SlopDur = ceil(SlopDur / sys.gradRasterTime) * sys.gradRasterTime;
-        FlatDur = ceil(FlatDur / sys.gradRasterTime) * sys.gradRasterTime;
-    end
+    SlopDur = ceil(SlopDur / sys.gradRasterTime) * sys.gradRasterTime;
+    FlatDur = ceil(FlatDur / sys.gradRasterTime) * sys.gradRasterTime;
 
     % Gradient strengths in SI: G = Area / (SlopDur + FlatDur)
     denom = SlopDur + FlatDur;
     if denom <= 0
         error('Invalid timing (SlopDur+FlatDur <= 0). Check inputs/limits.');
     end
-    gradStr_Tm = areas_Tm_s / denom; % T/m
-
-    % Convert amplitudes into sys.gradUnit for mr.makeTrapezoid
-    amps = physicalToSysAmplitude(gradStr_Tm, sys);
+    gradStr = mpsarea / denom; % T/m
 
     chans = {'x','y','z'};
     grads = cell(1,n);
     for i = 1:n
         grads{i} = mr.makeTrapezoid(chans{i}, sys, ...
-            'amplitude', amps(i), ...
+            'amplitude', gradStr(i), ...
             'riseTime',  SlopDur, ...
             'flatTime',  FlatDur, ...
             'fallTime',  SlopDur);
