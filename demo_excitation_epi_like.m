@@ -5,8 +5,8 @@
 %       CalcExcitationGradientWaveforms.m
 %       CalcRephasingGradientWaveformByArea.m  (optional, if you use inter-line rephasing)
 
-clear; clc;
-
+clear; 
+close all;
 debugShowPlot = true;
 
 %% ---------------------------
@@ -23,24 +23,26 @@ PORI = 1; SORI = 2;
 % "2D excitation" example: M is "unlimited" so we only use P and S
 FovM = inf;
 FovP = 40e-3;   % meters (40 mm)
-FovS = 5e-3;    % meters (5 mm)
+FovS = 8e-3;    % meters (5 mm)
 FOV  = [FovP, FovS];
-
-ang = linspace(0,1,10);
-for iii = 1 : length(ang)
-tiltAngle = ang(iii) * 2*pi;
+Offc = [0.02, 0.02]'; % meters
+flipAngle = pi/6;   % 90 deg excitation
+tiltAngle = pi/3;
 % norm vector of the k-space lines
 klineNormVec = [0, 1]';
-klineNormVec = [cos(tiltAngle) -sin(tiltAngle); sin(tiltAngle)  cos(tiltAngle)] * klineNormVec;
+klineProcVec = [1, 0]';
+TiltRot = [cos(tiltAngle) -sin(tiltAngle); sin(tiltAngle)  cos(tiltAngle)];
+klineNormVec = TiltRot * klineNormVec;
+klineProcVec = TiltRot * klineProcVec;
 fprintf('K-Space line norm vector:\n');
 fprintf('%g ', klineNormVec);   % transpose so fprintf prints row-wise
 fprintf('\n');
 
 % Off-center (meters) – used to add phase ramp across k
-Offc = [20e-3, 20e-3];   % (M,P,S) in meters
+Offc = [20e-3, 20e-3]';   % (M,P,S) in meters
 
 % Choose EPI style (between lines)
-EPIType = "BiPolar";  % "FlyBack" or "BiPolar"
+EPIType = "FlyBack";  % "FlyBack" or "BiPolar"
 
 %% ---------------------------
 % 1) RF 1D shapes (example)
@@ -52,6 +54,7 @@ matPath  = fullfile(thisDir, 'rfshapes', 'sincgauss21.mat');  % subfolder "data"
 rf_shape = load(matPath);
 amShape = rf_shape.shape.am;
 amShape = amShape / max(amShape);
+nrfs = numel(amShape);
 
 % TBW + ref ratios (from your python object)
 tbwP = rf_shape.shape.tbp;
@@ -68,8 +71,14 @@ ksz = [tbwP/FovP, tbwS/FovS];
 kmin = -ksz .* [refP, refS];
 kmax = kmin + ksz;
 
-fprintf('kmin(P,S) = [%g, %g] 1/m\n', kmin(1), kmin(2));
-fprintf('kmax(P,S) = [%g, %g] 1/m\n', kmax(1), kmax(2));
+fprintf('kmin(P,S) = [%g, %g] 1/m\n', kmin(PORI), kmin(SORI));
+fprintf('kmax(P,S) = [%g, %g] 1/m\n', kmax(PORI), kmax(SORI));
+
+% now we have rf waveform and k-space supports in P and S
+kcoorP = linspace(kmin(PORI), kmax(PORI), nrfs);
+kcoorS = linspace(kmin(SORI), kmax(SORI), nrfs);
+rfwFuncP = griddedInterpolant(kcoorP, amShape, 'linear', 'nearest');
+rfwFuncS = griddedInterpolant(kcoorS, amShape, 'linear', 'nearest');
 
 %% ---------------------------
 % 3) Build RF in excitation k-space: RfVal(P,S) = rfP(kP)*rfS(kS)
@@ -238,6 +247,19 @@ assert(all(sum(pntOnEdge) == 2), 'Each k-space line has two intersection points 
 endPoints = endPoints(:, pntOnEdge);
 endPoints = reshape(endPoints, [2, 2, nLines]);
 
+% sort that endPoints order, so that they align with line proceed direction
+% endPoints: 2x2xN
+%   endPoints(:,1,i) = point1 [x;y]
+%   endPoints(:,2,i) = point2 [x;y]
+dpnt = squeeze(endPoints(:,2,:) - endPoints(:,1,:));   % 2xN, direction point1->point2
+dotv = klineProcVec.' * dpnt;                          % 1xN
+
+swapMask = dotv < 0.0;
+
+% swap point1 and point2 for the lines that are opposite to u
+endPoints(:, [1 2], swapMask) = endPoints(:, [2 1], swapMask);
+
+
 % plot lines and box
 % c0 = [0 1 0];   % green
 % c1 = [0 0 1];   % blue
@@ -251,7 +273,11 @@ y = squeeze(endPoints(2,:,:));   % 2x30
 figure; hold on; axis equal; grid on;
 hFirst = []; hLast = [];
 for i = 1:nLines
-    h = plot(x(:,i), y(:,i), '-o', 'Color', C(i,:), 'LineWidth', 1.5);
+    % h = plot(x(:,i), y(:,i), '-o', 'Color', C(i,:), 'LineWidth', 1.5);
+    h = quiver(endPoints(1,1,i), endPoints(2,1,i), ...
+        endPoints(1,2,i) - endPoints(1,1,i), endPoints(2,2,i) - endPoints(2,1,i), ...
+        0, 'LineWidth', 1.5, 'MaxHeadSize', 0.5, 'Color', C(i,:));
+    h.AutoScale = 'off';
     if i == 1, hFirst = h; end
     if i == nLines, hLast  = h; end
 end
@@ -262,62 +288,130 @@ legend([hFirst hLast], {'First line (cool)', 'Last line (warm)'}, 'Location','be
 
 hold off;
 
-end
-% 
-% 
-% % Each line: kstart = [0, kminP, sVal], kend = [0, kmaxP, sVal]
-% EndPoints = zeros(nLines, 2, 3);
-% for i = 1:nLines
-%     EndPoints(i,1,:) = [0, kmin(2), sVals(i)];
-%     EndPoints(i,2,:) = [0, kmax(2), sVals(i)];
-% end
-% 
+
 % %% ---------------------------
 % % 5) Build sequence: add 3 blocks per line (lead -> exci(+RF) -> tail)
 % % ----------------------------
-% flipAngle = pi/2;   % 90 deg excitation
-% prevTail = [];
-% prevExci = [];
-% prevLead = [];
-% 
-% for li = 1:nLines
-%     bFlip = (mod(li,2)==0) && (EPIType=="BiPolar");
-%     if bFlip
-%         kstart = squeeze(EndPoints(li,2,:)).';
-%         kend   = squeeze(EndPoints(li,1,:)).';
-%     else
-%         kstart = squeeze(EndPoints(li,1,:)).';
-%         kend   = squeeze(EndPoints(li,2,:)).';
-%     end
-% 
-%     [gLead, gExci, gTail] = CalcExcitationGradientWaveforms(kstart, kend, sys);
-% 
-%     % --- Optional: merge prev tail + current lead into a rephasing block (like Python) ---
-%     if li > 1
-%         % Compute areas in 1/m from trapezoids (full area)
-%         tailArea = cellfun(@(g) trapArea(g), prevTail);
-%         leadArea = cellfun(@(g) trapArea(g), gLead);
-%         totalRephArea = tailArea + leadArea;
-% 
-%         % If you have CalcRephasingGradientWaveformByArea (expects 1/m), use it:
-%         gReph = CalcRephasingGradientWaveformByArea(totalRephArea, sys, 0); % slope=0 -> auto
-% 
-%         % Add rephasing as its own block
-%         addGradBlock(seq, gReph);
-%     else
-%         % First line: add lead as its own block
-%         addGradBlock(seq, gLead);
-%     end
-% 
-%     % --- Build RF waveform along this k-line by sampling RfVal2D ---
-%     % Sample along P for fixed S
-%     Nsamp = 256;
-%     kPline = linspace(kstart(2), kend(2), Nsamp).';
-%     kSline = ones(Nsamp,1)*kstart(3);
-% 
-%     % Sample the 2D RF table (interpn)
-%     rfw = interpn(KP, KS, RfVal2D, kPline, kSline, 'linear', 0);
-% 
+prevTail = [];
+prevExci = [];
+prevLead = [];
+Nsamp = 256; 
+
+% estimate total k-space line length
+diffLines = squeeze(endPoints(:,2,:) - endPoints(:,1,:));  % 2x18
+sumDiff = sum(diffLines, 2);  
+[~,dummyExci,~] = CalcExcitationGradientWaveforms([0,0]', sumDiff, sys);
+dummytotflatdur = dummyExci{1}.flatTime;
+
+% estimated total rf dur. The length of each line is different. We scale
+% the no of samples of each rf pulse against the center line, with the RF 
+% pulse of the center line having 256 samples.
+ilineCen = (0 - numStart + 1);
+klineLength = squeeze(vecnorm(endPoints(:,2,:) - endPoints(:,1,:), 2, 1)); % 2-norm, 1-first column
+klineRatio = klineLength / klineLength(ilineCen);
+RfShapes  = cell(1, nLines);
+for li = 1:nLines
+    kstart = squeeze(endPoints(:,2,li));
+    kend   = squeeze(endPoints(:,1,li));
+    nsamples = round(klineRatio(li) * Nsamp);
+    % --- Build RF waveform along this k-line by sampling RfVal2D ---
+    t = linspace(0, 1, nsamples);               % 1xN
+    coord = kstart + t.*(kend - kstart);        % 2xN, N points from A to B
+    am = rfwFuncP(coord(PORI,:)) .* rfwFuncS(coord(SORI,:));
+    RfShapes{li} = am;
+end
+% compare the Rf total dur and Gradient flattop total dur
+dummyrfshape = [RfShapes{:}];
+dummyrf = mr.makeArbitraryRf(dummyrfshape, flipAngle, 'system', sys);
+dummyrfdur = dummyrf.shape_dur;
+% adjust number of samples, therefore dur to fully utilize max B1 
+rfScaleFactor = max(abs(dummyrf.signal)) / (sys.maxB1 * 0.98);
+dummyrfdurMaxB1 = dummyrfdur * rfScaleFactor;
+% final dur for both rf and gradients flat top.
+dummyFinalDur = max(dummyrfdurMaxB1, dummytotflatdur);
+rfScaleFactor = dummyFinalDur / dummyrfdur;
+grScaleFactor = dummyFinalDur / dummytotflatdur;
+% adjust samples for rf pulses, this is the only way to change their
+% duratioon
+Nsamp = Nsamp * rfScaleFactor;
+% generate the RF again with the right no of samples.
+for li = 1:nLines
+    kstart = squeeze(endPoints(:,2,li));
+    kend   = squeeze(endPoints(:,1,li));
+    nsamples = round(klineRatio(li) * Nsamp);
+    % --- Build RF waveform along this k-line by sampling RfVal2D ---
+    t = linspace(0, 1, nsamples);               % 1xN
+    coord = kstart + t.*(kend - kstart);        % 2xN, N points from A to B
+    am = rfwFuncP(coord(PORI,:)) .* rfwFuncS(coord(SORI,:));
+    RfShapes{li} = am;
+end
+dummyrfshape = [RfShapes{:}];
+dummyrf = mr.makeArbitraryRf(dummyrfshape, flipAngle, 'system', sys);
+dummyrfdur = dummyrf.shape_dur;
+% stores the signal back into the cell array
+startIdx = 1;
+endIdx = length(RfShapes{1});
+for li = 1:nLines
+    RfShapes{li} = dummyrf.signal(startIdx:endIdx)';
+    startIdx = endIdx+1;
+    if li < nLines
+        endIdx = endIdx + length(RfShapes{li+1});
+    end
+end
+
+% generate a new system object with new gradient constraint.
+sysg = sys;
+sysg.maxGrad = sys.maxGrad / grScaleFactor;
+
+% now we can calcualte the gradients and rf pulses.
+% LeadGrads = cell(1, nLines);
+% ExciGrads = cell(1, nLines);
+% TailGrads = cell(1, nLines);
+% RfShapes  = zeros(Nsamp, nLines);
+anchorTime = 0;
+for li = 1:nLines
+     bFlip = (mod(li,2)==0) && (EPIType=="BiPolar");
+     if bFlip
+         kstart = squeeze(endPoints(:,2,li));
+         kend   = squeeze(endPoints(:,1,li));
+     else
+         kstart = squeeze(endPoints(:,1,li));
+         kend   = squeeze(endPoints(:,2,li));
+     end
+     [gLead, gExci, gTail] = CalcExcitationGradientWaveforms(kstart, kend, sysg);
+     % LeadGrads{li} = gLead;
+     % ExciGrads{li} = gExci;
+     % TailGrads{li} = gTail;
+     % gLead{1}.delay = anchorTime;
+     % gLead{2}.delay = anchorTime;
+     % gExci{1}.delay = anchorTime + mr.calcDuration(gLead{1});
+     % gExci{2}.delay = anchorTime + mr.calcDuration(gLead{2});
+     
+
+    % --- Build RF waveform along this k-line by sampling RfVal2D ---
+    nsamples = length(RfShapes{li});
+    t = linspace(0, 1, nsamples);               % 1xN
+    coord = kstart + t.*(kend - kstart);     % 2xN, N points from A to B
+    % am = rfwFuncP(coord(PORI,:)) .* rfwFuncS(coord(SORI,:));
+    % RfShapes(:, li) = am;
+    ph = 2*pi * Offc.' * coord;
+    b1_signal = RfShapes{li} .* exp(1j*ph);
+    % --- Optional: merge prev tail + current lead into a rephasing block (like Python) ---
+    if li > 1
+        % Compute areas in 1/m from trapezoids (full area)
+        totalRephArea = cellfun(@(s) s.area, prevTail) + cellfun(@(s) s.area, gLead);
+        % If you have CalcRephasingGradientWaveformByArea (expects 1/m), use it:
+        gReph = CreateRephasingGradientWaveformByArea(totalRephArea, sys, 0); % slope=0 -> auto        
+        gReph{1}.channel = 'y';
+        gReph{2}.channel = 'z';
+        % Add rephasing as its own block
+        seq.addBlock(gReph{1}, gReph{2});
+    else
+        % First line: add lead as its own block
+        % seq.addBlock(seq, gLead{1}, gLead{2});
+    end
+
+
 %     % Add off-center phase term: phase = -2*pi * k·Offc (k in 1/m, Offc in m)
 %     kLineSamples = [zeros(Nsamp,1), kPline, kSline];
 %     ph = -2*pi * (kLineSamples * Offc(:));   % radians
@@ -328,26 +422,36 @@ end
 %     Nr = max(1, round(Tflat / sys.rfRasterTime));
 %     b1r = interp1(linspace(0,1,Nsamp), b1, linspace(0,1,Nr), 'linear', 0).';
 % 
-%     rf = mr.makeArbitraryRf(b1r, flipAngle, 'system', sys);
-%     rf.delay = gExci{1}.riseTime;   % start RF on plateau
+    rf = mr.makeArbitraryRf(ones(1, nsamples), pi/100, 'system', sys);
+    rf.signal = b1_signal;
+    rf.t = (0:nsamples-1).' * sys.rfRasterTime; 
+    rf.delay = gExci{1}.riseTime;   % start RF on plateau
 % 
-%     % Add excitation gradients + RF in the same block
-%     seq.addBlock(gExci{1}, gExci{2}, gExci{3}, rf);
+    % Add excitation gradients + RF in the same block
+    gExci{1}.channel = 'y';
+    gExci{2}.channel = 'z';
+    seq.addBlock(gExci{1}, gExci{2}, rf);
 % 
 %     % Tail as its own block
 %     addGradBlock(seq, gTail);
 % 
-%     % store for next iteration
-%     prevTail = gTail;
-%     prevExci = gExci;
-%     prevLead = gLead;
-% end
-% 
+    % store for next iteration
+    prevTail = gTail;
+    prevExci = gExci;
+    prevLead = gLead;
+end
+gTail{1}.channel = 'y';
+gTail{2}.channel = 'z';
+seq.addBlock(gTail{1}, gTail{2});
+
+% % 
 % %% ---------------------------
 % % 6) Plot the sequence
 % % ----------------------------
-% seq.plot('timeDisp','ms');
-% 
+seq.plot('timeDisp','ms');
+
+
+
 % %% ---------------------------
 % % Helper functions
 % % ----------------------------
@@ -362,13 +466,13 @@ end
 %         seq.addBlock(gcell{1});
 %     end
 % end
-% 
+
 % function A = trapArea(g)
 %     % Full trapezoid area in Pulseq gradient units (Hz/m*s = 1/m)
 %     A = g.amplitude * (g.flatTime + 0.5*(g.riseTime + g.fallTime));
 % end
-% 
-% 
+
+
 function onEdge = isOnRectEdge(x, y, xmin, xmax, ymin, ymax, tol)
     if nargin < 7, tol = 1e-12; end
 

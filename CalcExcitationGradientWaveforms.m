@@ -23,6 +23,7 @@ function [LeadRephGradsMPS, ExcitationGradsMPS, TailRephGradsMPS] = CalcExcitati
     if numel(kstart) ~= numel(kend)
         error('kstart and kend must have the same length.');
     end
+    nel = numel(kstart);
 
     % kstride in m^-1
     kstride = kend - kstart;
@@ -62,11 +63,11 @@ function [LeadRephGradsMPS, ExcitationGradsMPS, TailRephGradsMPS] = CalcExcitati
     % --- Build Pulseq gradient objects for x/y/z (map M/P/S to x/y/z) ---
     chans = {'x','y','z'};  % choose your mapping M->x, P->y, S->z
 
-    LeadRephGradsMPS      = cell(1,3);
-    ExcitationGradsMPS    = cell(1,3);
-    TailRephGradsMPS      = cell(1,3);
+    LeadRephGradsMPS      = cell(1,nel);
+    ExcitationGradsMPS    = cell(1,nel);
+    TailRephGradsMPS      = cell(1,nel);
 
-    for ori = 1:3
+    for ori = 1:numel(kstart)
         ch = chans{ori};
 
         % Excitation trapezoid: rise=ExciSlopDur, flat=ExciFlatDur, fall=ExciSlopDur
