@@ -27,7 +27,7 @@ FovS = 8e-3;    % meters (5 mm)
 FOV  = [FovP, FovS];
 Offc = [0.02, 0.02]'; % meters
 flipAngle = pi/6;   % 90 deg excitation
-tiltAngle = pi/3;
+tiltAngle = 0;
 % norm vector of the k-space lines
 klineNormVec = [0, 1]';
 klineProcVec = [1, 0]';
@@ -42,7 +42,7 @@ fprintf('\n');
 Offc = [20e-3, 20e-3]';   % (M,P,S) in meters
 
 % Choose EPI style (between lines)
-EPIType = "FlyBack";  % "FlyBack" or "BiPolar"
+EPIType = "BiPolar";  % "FlyBack" or "BiPolar"
 
 %% ---------------------------
 % 1) RF 1D shapes (example)
@@ -369,6 +369,7 @@ sysg.maxGrad = sys.maxGrad / grScaleFactor;
 % TailGrads = cell(1, nLines);
 % RfShapes  = zeros(Nsamp, nLines);
 anchorTime = 0;
+kspCenTime = 0; % k-space center time
 for li = 1:nLines
      bFlip = (mod(li,2)==0) && (EPIType=="BiPolar");
      if bFlip
@@ -379,19 +380,12 @@ for li = 1:nLines
          kend   = squeeze(endPoints(:,2,li));
      end
      [gLead, gExci, gTail] = CalcExcitationGradientWaveforms(kstart, kend, sysg);
-     % LeadGrads{li} = gLead;
-     % ExciGrads{li} = gExci;
-     % TailGrads{li} = gTail;
-     % gLead{1}.delay = anchorTime;
-     % gLead{2}.delay = anchorTime;
-     % gExci{1}.delay = anchorTime + mr.calcDuration(gLead{1});
-     % gExci{2}.delay = anchorTime + mr.calcDuration(gLead{2});
-     
 
     % --- Build RF waveform along this k-line by sampling RfVal2D ---
     nsamples = length(RfShapes{li});
     t = linspace(0, 1, nsamples);               % 1xN
     coord = kstart + t.*(kend - kstart);     % 2xN, N points from A to B
+
     % am = rfwFuncP(coord(PORI,:)) .* rfwFuncS(coord(SORI,:));
     % RfShapes(:, li) = am;
     ph = 2*pi * Offc.' * coord;
@@ -406,12 +400,11 @@ for li = 1:nLines
         gReph{2}.channel = 'z';
         % Add rephasing as its own block
         seq.addBlock(gReph{1}, gReph{2});
+        anchorTime = anchorTime + mr.calcDuration(gReph{1});
     else
         % First line: add lead as its own block
         % seq.addBlock(seq, gLead{1}, gLead{2});
     end
-
-
 %     % Add off-center phase term: phase = -2*pi * k·Offc (k in 1/m, Offc in m)
 %     kLineSamples = [zeros(Nsamp,1), kPline, kSline];
 %     ph = -2*pi * (kLineSamples * Offc(:));   % radians
@@ -422,7 +415,7 @@ for li = 1:nLines
 %     Nr = max(1, round(Tflat / sys.rfRasterTime));
 %     b1r = interp1(linspace(0,1,Nsamp), b1, linspace(0,1,Nr), 'linear', 0).';
 % 
-    rf = mr.makeArbitraryRf(ones(1, nsamples), pi/100, 'system', sys);
+    rf = mr.makeArbitraryRf(ones(1, nsamples), pi/100, 'use','excitation', 'system', sys);
     rf.signal = b1_signal;
     rf.t = (0:nsamples-1).' * sys.rfRasterTime; 
     rf.delay = gExci{1}.riseTime;   % start RF on plateau
@@ -431,6 +424,16 @@ for li = 1:nLines
     gExci{1}.channel = 'y';
     gExci{2}.channel = 'z';
     seq.addBlock(gExci{1}, gExci{2}, rf);
+    
+    if li == ilineCen
+        t = linspace(0, 1, 4096);
+        coord = kstart + t.*(kend - kstart);
+        [~, idxc] =  min(vecnorm(coord, 2, 1));
+        kspCenTime = anchorTime + gExci{1}.riseTime + idxc / 4096 * gExci{1}.flatTime;
+        fprintf('k-space center time is %f\n', kspCenTime);
+    end
+
+    anchorTime = anchorTime + mr.calcDuration(gExci{1});
 % 
 %     % Tail as its own block
 %     addGradBlock(seq, gTail);
@@ -443,6 +446,9 @@ end
 gTail{1}.channel = 'y';
 gTail{2}.channel = 'z';
 seq.addBlock(gTail{1}, gTail{2});
+
+exciFinTime = seq.duration();
+
 
 % % 
 % %% ---------------------------
