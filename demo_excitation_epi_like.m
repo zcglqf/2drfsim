@@ -14,14 +14,14 @@ debugShowPlot = true;
 % ----------------------------
 % Use Hz/m units to match your current gradient math in 1/m.
 sys = mr.opts('MaxGrad', 33, 'GradUnit','mT/m', ...
-              'MaxSlew', 100, 'SlewUnit','T/m/s');
+              'MaxSlew', 130, 'SlewUnit','T/m/s');
 seq = mr.Sequence(sys);
 
 % Indices: P=1, S=2
 PORI = 1; SORI = 2;
 
 % "2D excitation" example: M is "unlimited" so we only use P and S
-FovM = inf;
+FovM = 40e-3;
 FovP = 40e-3;   % meters (40 mm)
 FovS = 8e-3;    % meters (5 mm)
 FOV  = [FovP, FovS];
@@ -324,6 +324,7 @@ end
 dummyrfshape = [RfShapes{:}];
 dummyrf = mr.makeArbitraryRf(dummyrfshape, flipAngle, 'system', sys);
 dummyrfdur = dummyrf.shape_dur;
+sys.maxB1 = 20e-6 * sys.gamma; % do this for pulseq v1.4.2
 % adjust number of samples, therefore dur to fully utilize max B1 
 rfScaleFactor = max(abs(dummyrf.signal)) / (sys.maxB1 * 0.98);
 dummyrfdurMaxB1 = dummyrfdur * rfScaleFactor;
@@ -449,7 +450,95 @@ seq.addBlock(gTail{1}, gTail{2});
 
 exciFinTime = seq.duration();
 
+%% Define 180 refocusing part and EPI acquisition.
+fov = 256e-3;
+Nx = 64; Ny = 64;
+FOVM = 40e-3;
+deltak=1/fov;
+kWidth = Nx*deltak;
+readoutTime = 3.2e-4;
+gx = mr.makeTrapezoid('x',sys,'FlatArea',kWidth,'FlatTime',readoutTime);
+adc = mr.makeAdc(Nx,sys,'Duration',gx.flatTime,'Delay',gx.riseTime);
 
+% Pre-phasing gradients
+preTime=8e-4;
+%gxPre = mr.makeTrapezoid('x',sys,'Area',-gx.area/2-deltak/2,'Duration',preTime);
+% gzReph = mr.makeTrapezoid('z',sys,'Area',-gz.area/2,'Duration',preTime);
+%gyPre = mr.makeTrapezoid('y',sys,'Area',-Ny/2*deltak,'Duration',preTime);
+% we need no minus for in-plane prephasers because of the spin-echo (position reflection in k-space)
+gxPre = mr.makeTrapezoid('x',sys,'Area',gx.area/2-deltak/2,'Duration',preTime);
+gyPre = mr.makeTrapezoid('y',sys,'Area',Ny/2*deltak,'Duration',preTime);
+
+% Phase blip in shortest possible time
+dur = ceil(2*sqrt(deltak/sys.maxSlew)/10e-6)*10e-6;
+gy = mr.makeTrapezoid('y',sys,'Area',deltak,'Duration',dur);
+
+% Refocusing pulse with spoiling gradients
+% rf180 = mr.makeBlockPulse(pi,sys,'Duration',500e-6,'use','refocusing');
+[rf180, gz180] = mr.makeSincPulse(pi,sys,'Duration', 4000e-6,...
+    'SliceThickness',FovS,'apodization',0.5,'timeBwProduct',4,...
+    'use','refocusing');
+gzSpoil = mr.makeTrapezoid('z',sys,'Area', 2*6/FovS,'Duration',3*preTime);
+
+% Calculate delay time %% MZ: I thisk this is very wrong!
+minTEhalf = (exciFinTime - kspCenTime) + mr.calcDuration(gzSpoil) + (rf180.delay + mr.calcRfCenter(rf180));
+TE = 60e-3; %minTEhalf * 2;
+durationToCenter = (Nx/2+0.5)*mr.calcDuration(gx) + Ny/2*mr.calcDuration(gy);
+% rfCenterInclDelay=rf.delay + mr.calcRfCenter(rf);
+rf180centerInclDelay=rf180.delay + mr.calcRfCenter(rf180);
+% delayTE1=TE/2 - (mr.calcDuration(gz) - rfCenterInclDelay) - preTime - mr.calcDuration(gzSpoil) - rf180centerInclDelay;
+exciFinTime = round(exciFinTime / sys.gradRasterTime) * sys.gradRasterTime;
+kspCenTime = round(kspCenTime / sys.gradRasterTime) * sys.gradRasterTime;
+delayTE1=TE/2 - (exciFinTime - kspCenTime) - preTime - mr.calcDuration(gzSpoil) - rf180centerInclDelay;
+delayTE2=TE/2 - (mr.calcDuration(rf180) - rf180centerInclDelay) - mr.calcDuration(gzSpoil) - durationToCenter;
+
+% Define sequence blocks
+% seq.addBlock(rf,gz);
+seq.addBlock(gxPre,gyPre); 
+seq.addBlock(mr.makeDelay(delayTE1));
+seq.addBlock(gzSpoil);
+seq.addBlock(rf180, gz180);
+seq.addBlock(gzSpoil);
+seq.addBlock(mr.makeDelay(delayTE2));
+for i=1:Ny
+    seq.addBlock(gx,adc);           % Read one line of k-space
+    seq.addBlock(gy);               % Phase blip
+    gx.amplitude = -gx.amplitude;   % Reverse polarity of read gradient
+end
+seq.addBlock(mr.makeDelay(1e-4));
+
+%% check whether the timing of the sequence is correct
+[ok, error_report]=seq.checkTiming;
+
+if (ok)
+    fprintf('Timing check passed successfully\n');
+else
+    fprintf('Timing check failed! Error listing follows:\n');
+    fprintf([error_report{:}]);
+    fprintf('\n');
+end
+
+%% export and visualization
+seq.setDefinition('FOV', [fov fov FovS]);
+seq.setDefinition('Name', 'epise');
+seq.write('epi_se.seq');   % Output sequence for scanner
+seq.plot();             % Plot sequence waveforms
+
+%% calculate trajectory 
+[ktraj_adc, t_adc, ktraj, t_ktraj, t_excitation, t_refocusing] = seq.calculateKspacePP();
+%[ktraj_adc, ktraj, t_excitation, t_refocusing, t_adc] = seq.calculateKspace();
+
+%% plot k-spaces
+figure; plot(t_ktraj, ktraj'); % plot the entire k-space trajectory
+hold; plot(t_adc,ktraj_adc(1,:),'.'); % and sampling points on the kx-axis
+
+figure; plot(ktraj(1,:),ktraj(2,:),'b',...
+             ktraj_adc(1,:),ktraj_adc(2,:),'r.'); % a 2D plot
+axis('equal'); % enforce aspect ratio for the correct trajectory display
+
+%% sanity checks
+TE_check=(t_refocusing(1)-t_excitation(1))*2;
+fprintf('intended TE=%.03f ms, actual spin echo TE=%.03fms\n', TE*1e3, TE_check*1e3); 
 % % 
 % %% ---------------------------
 % % 6) Plot the sequence
@@ -458,25 +547,8 @@ seq.plot('timeDisp','ms');
 
 
 
-% %% ---------------------------
-% % Helper functions
-% % ----------------------------
-% function addGradBlock(seq, gcell)
-%     % Add up to 3 gradients as a single block
-%     if isempty(gcell), return; end
-%     if numel(gcell)==3
-%         seq.addBlock(gcell{1}, gcell{2}, gcell{3});
-%     elseif numel(gcell)==2
-%         seq.addBlock(gcell{1}, gcell{2});
-%     else
-%         seq.addBlock(gcell{1});
-%     end
-% end
 
-% function A = trapArea(g)
-%     % Full trapezoid area in Pulseq gradient units (Hz/m*s = 1/m)
-%     A = g.amplitude * (g.flatTime + 0.5*(g.riseTime + g.fallTime));
-% end
+
 
 
 function onEdge = isOnRectEdge(x, y, xmin, xmax, ymin, ymax, tol)
