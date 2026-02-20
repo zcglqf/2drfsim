@@ -21,15 +21,16 @@ seq = mr.Sequence(sys);
 PORI = 1; SORI = 2;
 
 % "2D excitation" example: M is "unlimited" so we only use P and S
-FovM = 40e-3;
-FovP = 40e-3;   % meters (40 mm)
-FovS = 8e-3;    % meters (5 mm)
+FovM = 50e-3;
+FovP = 50e-3;   % meters (40 mm)
+FovS = 40e-3;    % meters (5 mm)
 FOV  = [FovP, FovS];
 Offc = [0.02, 0.02]'; % meters
-flipAngle = pi/6;   % 90 deg excitation
+flipAngle = pi/2;   % 90 deg excitation
 tiltAngle = 0;
 % norm vector of the k-space lines
 klineNormVec = [0, 1]';
+% unit vector along k-space lines
 klineProcVec = [1, 0]';
 TiltRot = [cos(tiltAngle) -sin(tiltAngle); sin(tiltAngle)  cos(tiltAngle)];
 klineNormVec = TiltRot * klineNormVec;
@@ -84,10 +85,10 @@ rfwFuncS = griddedInterpolant(kcoorS, amShape, 'linear', 'nearest');
 % 3) Build RF in excitation k-space: RfVal(P,S) = rfP(kP)*rfS(kS)
 % ----------------------------
 % Create 1D k grids for P and S matching the RF sample count
-N = numel(amShape);
-t01 = linspace(0,1,N).'; % normalized time index
-kP = kmin(1) + (kmax(1)-kmin(1))*t01;
-kS = kmin(2) + (kmax(2)-kmin(2))*t01;
+assert(numel(amShape) == nrfs);
+t01 = linspace(0,1,nrfs).'; % normalized time index
+kP = kmin(PORI) + (kmax(PORI)-kmin(PORI))*t01;
+kS = kmin(SORI) + (kmax(SORI)-kmin(SORI))*t01;
 
 % Pad endpoints like Python (optional)
 kPpad = [2*kP(1)-kP(2); kP; 2*kP(end)-kP(end-1)];
@@ -112,7 +113,7 @@ end
 % 4) Generate 2D k-lines (P direction, stepped in S)
 % ----------------------------
 % Choose FOE step in meters for S (just like your python uses FOE and 1/FOE)
-FOE_S = 50e-3;              % meters
+FOE_S = 200e-3;              % meters
 dK_S  = 1/FOE_S;            % 1/m
 % ------------------------------------
 
@@ -165,28 +166,34 @@ dK_S  = 1/FOE_S;            % 1/m
 
 
 
-% length of traspass across the k-space region by norm vector
+% line equations of the 4 edges, represented by norm vectors and
+% interceptions.
 edgeNormVecs = [1, 0; 0, 1];
 edgeNormVecs = kron(edgeNormVecs, [1, 1]');
 edgeDists = [kmin(1), kmax(1), kmin(2), kmax(2)]';
 
-% For each k-space line, its norm is n = (P, S) = (a11, a12) = (0, 1), distance to origin is
-% d1 = n * dK_S, n belong to [numStart, numStop]; with rotation, n -> R * n;
+% For each k-space line, its norm is n = (P, S) = (a11, a12), which is (0, 1) 
+% without tilt. Interception (distance from origin to the line) is d1 = n * dK_S, 
+% n belong to [numStart, numStop]; with rotation, n -> R * n;
 % the line can be represented as 
 %       (a11, a12) x (x, y)^T = d1
-% On the other hand, the norm of an edge is n = (1, 0), distance is (e.g.) kmin
+% On the other hand, the norm of an edge is, e.g, n = (1, 0), interception is e.g. kmin
 % , the edge line can be represented as
 %       (a21, a22) x (x, y)^T = d2
 % the intersection between the the k-line and edge can be solved using
 %       |a11, a12| |x|     d1
 %       |a21, a22| |y|  =  d2
 % mix all line and all 4 edges, can create a larger matrix Ax = b, and
-% solve for the intersection points.
+% solve for the intersection points. suppose there are N lines, they have
+% same norm vectors but different interceptions - 1 norm vector, N
+% interceptions - leading to 1 row and N colums for the linear equation. 
+% For the 4 edges, it will be 2 norm vectors and 4 interceptions - leading to 4 rows for the linear equaitons.
 
 % Each k-line equation, combined with each of the 4 k-space edges, forms a linear system A*x = b.
+% Together, A will be a 8 x 8 matrix, unknow marix X will be a 8 x 4N block matrix. and b is 8 x 4N too. 
 % Solving these systems gives the intersection points between each k-line and the k-space edges.
 % From the two valid intersection points (endpoints) of each k-line, we can compute the gradient
-% and RF waveforms.
+% and RF waveforms
 %
 % To do this efficiently for many lines, we build a large block-diagonal (partitioned) matrix A
 % and a corresponding stacked vector/matrix b, then solve for all intersection points at once.
@@ -194,8 +201,8 @@ edgeDists = [kmin(1), kmax(1), kmin(2), kmax(2)]';
 % 5 k-lines:
 %
 %        _         A        _   _                 X                   _     _                 B                  _
-%       |  a a               | |  x x x x x                              |   |  b b b b b                              |
-%       |  a a               | |  x x x x x                              |   |  b b b b b                              |
+%       |  a a <--edge norm  | |  x x x x x                              |   |  b b b b b  <-- edge interc             |
+%       |  a a <--line norm  | |  x x x x x                              |   |  b b b b b  <-- line interc             |
 %       |      a a           | |            x x x x x                    |   |            b b b b b                    |
 %       |      a a           | |            x x x x x                    | = |            b b b b b                    |
 %       |          a a       | |                      x x x x x          |   |                      b b b b b          |
@@ -222,11 +229,12 @@ else
     X = A\B;
 end
 
+% Organize 8x4N block matrix into 8xN matrix 
 endPoints = [X(1:2, 1:nLines); ...
     X(3:4,nLines+1:2*nLines); ...
     X(5:6,2*nLines+1:3*nLines); ...
     X(7:8,3*nLines+1:4*nLines)];
-endPoints = reshape(endPoints, [2, 4, nLines]); % coordinates, line, edge
+endPoints = reshape(endPoints, [2, 4, nLines]); % coordinates, edge, line
 
 % plot before pruning
 figure; hold on; axis equal; grid on;
@@ -240,18 +248,18 @@ for i = 1:nLines
     if i == nLines, hLast  = h; end
 end
 legend([hFirst hLast], {'First line (cool)', 'Last line (warm)'}, 'Location','best');
-plot(bx, by, 'k-', 'LineWidth', 1.5); hold off;
+plot(bx, by, 'k-', 'LineWidth', 1.5); hold off; title('k-space lines before prunning');
 
-pntOnEdge = isOnRectEdge(squeeze(endPoints(1,:,:)), squeeze(endPoints(2,:,:)), kmin(1), kmax(1), kmin(2), kmax(2), 1e-3*abs(dK_S));
+pntOnEdge = isOnRectEdge(squeeze(endPoints(1,:,:)), squeeze(endPoints(2,:,:)), kmin(PORI), kmax(PORI), kmin(SORI), kmax(SORI), 1e-3*abs(dK_S));
 assert(all(sum(pntOnEdge) == 2), 'Each k-space line has two intersection points with edges of k-space.');
 endPoints = endPoints(:, pntOnEdge);
-endPoints = reshape(endPoints, [2, 2, nLines]);
+endPoints = reshape(endPoints, [2, 2, nLines]); % coordinates, 2 edges expected, line
 
-% sort that endPoints order, so that they align with line proceed direction
+% sort the endPoints order, so that they align with line proceed direction
 % endPoints: 2x2xN
 %   endPoints(:,1,i) = point1 [x;y]
 %   endPoints(:,2,i) = point2 [x;y]
-dpnt = squeeze(endPoints(:,2,:) - endPoints(:,1,:));   % 2xN, direction point1->point2
+dpnt = squeeze(endPoints(:,2,:) - endPoints(:,1,:));   % 2xN, coordiantes, line
 dotv = klineProcVec.' * dpnt;                          % 1xN
 
 swapMask = dotv < 0.0;
@@ -260,16 +268,9 @@ swapMask = dotv < 0.0;
 endPoints(:, [1 2], swapMask) = endPoints(:, [2 1], swapMask);
 
 
-% plot lines and box
-% c0 = [0 1 0];   % green
-% c1 = [0 0 1];   % blue
-% t  = linspace(0,1,nLines).';
-% C  = (1-t).*c0 + t.*c1;   % Nx3 colors
-% C = turbo(nLines);
 
 x = squeeze(endPoints(1,:,:));   % 2x30
 y = squeeze(endPoints(2,:,:));   % 2x30
-
 figure; hold on; axis equal; grid on;
 hFirst = []; hLast = [];
 for i = 1:nLines
@@ -292,13 +293,14 @@ hold off;
 % %% ---------------------------
 % % 5) Build sequence: add 3 blocks per line (lead -> exci(+RF) -> tail)
 % % ----------------------------
-prevTail = [];
+prevTail = [];  
 prevExci = [];
 prevLead = [];
-Nsamp = 256; 
+Nsamp = 1e4; 
 
-% estimate total k-space line length
-diffLines = squeeze(endPoints(:,2,:) - endPoints(:,1,:));  % 2x18
+% estimate total k-space line length and the gradient object that can
+% achieve it.
+diffLines = squeeze(endPoints(:,2,:) - endPoints(:,1,:));  % 2xN
 sumDiff = sum(diffLines, 2);  
 [~,dummyExci,~] = CalcExcitationGradientWaveforms([0,0]', sumDiff, sys);
 dummytotflatdur = dummyExci{1}.flatTime;
@@ -311,8 +313,8 @@ klineLength = squeeze(vecnorm(endPoints(:,2,:) - endPoints(:,1,:), 2, 1)); % 2-n
 klineRatio = klineLength / klineLength(ilineCen);
 RfShapes  = cell(1, nLines);
 for li = 1:nLines
-    kstart = squeeze(endPoints(:,2,li));
-    kend   = squeeze(endPoints(:,1,li));
+    kstart = squeeze(endPoints(:,1,li));
+    kend   = squeeze(endPoints(:,2,li));
     nsamples = round(klineRatio(li) * Nsamp);
     % --- Build RF waveform along this k-line by sampling RfVal2D ---
     t = linspace(0, 1, nsamples);               % 1xN
@@ -325,7 +327,8 @@ dummyrfshape = [RfShapes{:}];
 dummyrf = mr.makeArbitraryRf(dummyrfshape, flipAngle, 'system', sys);
 dummyrfdur = dummyrf.shape_dur;
 sys.maxB1 = 20e-6 * sys.gamma; % do this for pulseq v1.4.2
-% adjust number of samples, therefore dur to fully utilize max B1 
+% adjust number of samples, therefore dur, to fully utilize max B1 
+% dummyrf.signal has absolute rf signal amplitudes in Hz
 rfScaleFactor = max(abs(dummyrf.signal)) / (sys.maxB1 * 0.98);
 dummyrfdurMaxB1 = dummyrfdur * rfScaleFactor;
 % final dur for both rf and gradients flat top.
@@ -337,8 +340,8 @@ grScaleFactor = dummyFinalDur / dummytotflatdur;
 Nsamp = Nsamp * rfScaleFactor;
 % generate the RF again with the right no of samples.
 for li = 1:nLines
-    kstart = squeeze(endPoints(:,2,li));
-    kend   = squeeze(endPoints(:,1,li));
+    kstart = squeeze(endPoints(:,1,li));
+    kend   = squeeze(endPoints(:,2,li));
     nsamples = round(klineRatio(li) * Nsamp);
     % --- Build RF waveform along this k-line by sampling RfVal2D ---
     t = linspace(0, 1, nsamples);               % 1xN
@@ -391,14 +394,15 @@ for li = 1:nLines
     % RfShapes(:, li) = am;
     ph = 2*pi * Offc.' * coord;
     b1_signal = RfShapes{li} .* exp(1j*ph);
+    subFA_rad = 2*pi * sum(RfShapes{li}) * sys.rfRasterTime;
     % --- Optional: merge prev tail + current lead into a rephasing block (like Python) ---
     if li > 1
         % Compute areas in 1/m from trapezoids (full area)
         totalRephArea = cellfun(@(s) s.area, prevTail) + cellfun(@(s) s.area, gLead);
         % If you have CalcRephasingGradientWaveformByArea (expects 1/m), use it:
         gReph = CreateRephasingGradientWaveformByArea(totalRephArea, sys, 0); % slope=0 -> auto        
-        gReph{1}.channel = 'y';
-        gReph{2}.channel = 'z';
+        gReph{1}.channel = 'x';
+        gReph{2}.channel = 'y';
         % Add rephasing as its own block
         seq.addBlock(gReph{1}, gReph{2});
         anchorTime = anchorTime + mr.calcDuration(gReph{1});
@@ -416,14 +420,14 @@ for li = 1:nLines
 %     Nr = max(1, round(Tflat / sys.rfRasterTime));
 %     b1r = interp1(linspace(0,1,Nsamp), b1, linspace(0,1,Nr), 'linear', 0).';
 % 
-    rf = mr.makeArbitraryRf(ones(1, nsamples), pi/100, 'use','excitation', 'system', sys);
-    rf.signal = b1_signal;
-    rf.t = (0:nsamples-1).' * sys.rfRasterTime; 
+    rf = mr.makeArbitraryRf(RfShapes{li}, subFA_rad, 'use','excitation', 'system', sys);
+    % rf.signal = abs(b1_signal);
+    % rf.t = (0:nsamples-1).' * sys.rfRasterTime; 
     rf.delay = gExci{1}.riseTime;   % start RF on plateau
 % 
     % Add excitation gradients + RF in the same block
-    gExci{1}.channel = 'y';
-    gExci{2}.channel = 'z';
+    gExci{1}.channel = 'x';
+    gExci{2}.channel = 'y';
     seq.addBlock(gExci{1}, gExci{2}, rf);
     
     if li == ilineCen
@@ -444,16 +448,16 @@ for li = 1:nLines
     prevExci = gExci;
     prevLead = gLead;
 end
-gTail{1}.channel = 'y';
-gTail{2}.channel = 'z';
+gTail{1}.channel = 'x';
+gTail{2}.channel = 'y';
 seq.addBlock(gTail{1}, gTail{2});
 
 exciFinTime = seq.duration();
 
 %% Define 180 refocusing part and EPI acquisition.
 fov = 256e-3;
-Nx = 64; Ny = 64;
-FOVM = 40e-3;
+Nx = 96; Ny = 96;
+FOVM = 200e-3;
 deltak=1/fov;
 kWidth = Nx*deltak;
 readoutTime = 3.2e-4;
@@ -478,11 +482,12 @@ gy = mr.makeTrapezoid('y',sys,'Area',deltak,'Duration',dur);
 [rf180, gz180] = mr.makeSincPulse(pi,sys,'Duration', 4000e-6,...
     'SliceThickness',FovS,'apodization',0.5,'timeBwProduct',4,...
     'use','refocusing');
-gzSpoil = mr.makeTrapezoid('z',sys,'Area', 2*6/FovS,'Duration',3*preTime);
+gz180.channel = 'y';
+gzSpoil = mr.makeTrapezoid('y',sys,'Area', 2*6/FovS,'Duration',3*preTime);
 
 % Calculate delay time %% MZ: I thisk this is very wrong!
 minTEhalf = (exciFinTime - kspCenTime) + mr.calcDuration(gzSpoil) + (rf180.delay + mr.calcRfCenter(rf180));
-TE = 60e-3; %minTEhalf * 2;
+TE = 120e-3; %minTEhalf * 2;
 durationToCenter = (Nx/2+0.5)*mr.calcDuration(gx) + Ny/2*mr.calcDuration(gy);
 % rfCenterInclDelay=rf.delay + mr.calcRfCenter(rf);
 rf180centerInclDelay=rf180.delay + mr.calcRfCenter(rf180);
