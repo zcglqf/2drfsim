@@ -23,7 +23,7 @@ PORI = 1; SORI = 2;
 % "2D excitation" example: M is "unlimited" so we only use P and S
 FovM = 50e-3;
 FovP = 50e-3;   % meters (40 mm)
-FovS = 40e-3;    % meters (5 mm)
+FovS = 10e-3;    % meters (5 mm)
 FOV  = [FovP, FovS];
 Offc = [0.02, 0.02]'; % meters
 flipAngle = pi/2;   % 90 deg excitation
@@ -390,8 +390,6 @@ for li = 1:nLines
     t = linspace(0, 1, nsamples);               % 1xN
     coord = kstart + t.*(kend - kstart);     % 2xN, N points from A to B
 
-    % am = rfwFuncP(coord(PORI,:)) .* rfwFuncS(coord(SORI,:));
-    % RfShapes(:, li) = am;
     ph = 2*pi * Offc.' * coord;
     b1_signal = RfShapes{li} .* exp(1j*ph);
     subFA_rad = 2*pi * sum(RfShapes{li}) * sys.rfRasterTime;
@@ -406,9 +404,6 @@ for li = 1:nLines
         % Add rephasing as its own block
         seq.addBlock(gReph{1}, gReph{2});
         anchorTime = anchorTime + mr.calcDuration(gReph{1});
-    else
-        % First line: add lead as its own block
-        % seq.addBlock(seq, gLead{1}, gLead{2});
     end
 %     % Add off-center phase term: phase = -2*pi * k·Offc (k in 1/m, Offc in m)
 %     kLineSamples = [zeros(Nsamp,1), kPline, kSline];
@@ -456,8 +451,8 @@ exciFinTime = seq.duration();
 
 %% Define 180 refocusing part and EPI acquisition.
 fov = 256e-3;
-Nx = 96; Ny = 96;
-FOVM = 200e-3;
+Nx = 32; Ny = 32;
+% FOVM = 200e-3;
 deltak=1/fov;
 kWidth = Nx*deltak;
 readoutTime = 3.2e-4;
@@ -470,7 +465,7 @@ preTime=8e-4;
 % gzReph = mr.makeTrapezoid('z',sys,'Area',-gz.area/2,'Duration',preTime);
 %gyPre = mr.makeTrapezoid('y',sys,'Area',-Ny/2*deltak,'Duration',preTime);
 % we need no minus for in-plane prephasers because of the spin-echo (position reflection in k-space)
-gxPre = mr.makeTrapezoid('x',sys,'Area',gx.area/2-deltak/2,'Duration',preTime);
+gxPre = mr.makeTrapezoid('x',sys,'Area',gx.area/2+deltak/2,'Duration',preTime);
 gyPre = mr.makeTrapezoid('y',sys,'Area',Ny/2*deltak,'Duration',preTime);
 
 % Phase blip in shortest possible time
@@ -480,31 +475,46 @@ gy = mr.makeTrapezoid('y',sys,'Area',deltak,'Duration',dur);
 % Refocusing pulse with spoiling gradients
 % rf180 = mr.makeBlockPulse(pi,sys,'Duration',500e-6,'use','refocusing');
 [rf180, gz180] = mr.makeSincPulse(pi,sys,'Duration', 4000e-6,...
-    'SliceThickness',FovS,'apodization',0.5,'timeBwProduct',4,...
+    'SliceThickness',FovS*1.3,'apodization',0.5,'timeBwProduct',4,...
     'use','refocusing');
 gz180.channel = 'y';
 gzSpoil = mr.makeTrapezoid('y',sys,'Area', 2*6/FovS,'Duration',3*preTime);
 
-% Calculate delay time %% MZ: I thisk this is very wrong!
-minTEhalf = (exciFinTime - kspCenTime) + mr.calcDuration(gzSpoil) + (rf180.delay + mr.calcRfCenter(rf180));
-TE = 120e-3; %minTEhalf * 2;
-durationToCenter = (Nx/2+0.5)*mr.calcDuration(gx) + Ny/2*mr.calcDuration(gy);
-% rfCenterInclDelay=rf.delay + mr.calcRfCenter(rf);
+% minTE1, minTE2
+durationToCenter = (Ny/2+0.5)*mr.calcDuration(gx) + Ny/2*mr.calcDuration(gy); % start of EPI train to echo center
 rf180centerInclDelay=rf180.delay + mr.calcRfCenter(rf180);
-% delayTE1=TE/2 - (mr.calcDuration(gz) - rfCenterInclDelay) - preTime - mr.calcDuration(gzSpoil) - rf180centerInclDelay;
 exciFinTime = round(exciFinTime / sys.gradRasterTime) * sys.gradRasterTime;
 kspCenTime = round(kspCenTime / sys.gradRasterTime) * sys.gradRasterTime;
+minTE1 = (exciFinTime - kspCenTime) + mr.calcDuration(gxPre) + mr.calcDuration(gzSpoil) + (rf180centerInclDelay);
+minTE2 = (rf180centerInclDelay) +  mr.calcDuration(gzSpoil) + durationToCenter;
+minTEHalf = max(minTE1, minTE2);
+minTEHalf = round(minTEHalf / sys.gradRasterTime) * sys.gradRasterTime;
+% Calculate delay time %% MZ: I thisk this is very wrong!
+% minTEhalf = (exciFinTime - kspCenTime) + mr.calcDuration(gzSpoil) + (rf180centerInclDelay);
+TE = minTEHalf * 2; % 120e-3; %minTEhalf * 2;
+
+
+% rfCenterInclDelay=rf.delay + mr.calcRfCenter(rf);
+
+% delayTE1=TE/2 - (mr.calcDuration(gz) - rfCenterInclDelay) - preTime - mr.calcDuration(gzSpoil) - rf180centerInclDelay;
+
 delayTE1=TE/2 - (exciFinTime - kspCenTime) - preTime - mr.calcDuration(gzSpoil) - rf180centerInclDelay;
 delayTE2=TE/2 - (mr.calcDuration(rf180) - rf180centerInclDelay) - mr.calcDuration(gzSpoil) - durationToCenter;
+delayTE1 = round(delayTE1 / sys.gradRasterTime) * sys.gradRasterTime;
+delayTE2 = round(delayTE2 / sys.gradRasterTime) * sys.gradRasterTime;
 
 % Define sequence blocks
 % seq.addBlock(rf,gz);
 seq.addBlock(gxPre,gyPre); 
-seq.addBlock(mr.makeDelay(delayTE1));
+if delayTE1 > sys.gradRasterTime
+    seq.addBlock(mr.makeDelay(delayTE1));
+end
 seq.addBlock(gzSpoil);
 seq.addBlock(rf180, gz180);
 seq.addBlock(gzSpoil);
-seq.addBlock(mr.makeDelay(delayTE2));
+if delayTE2 > sys.gradRasterTime
+    seq.addBlock(mr.makeDelay(delayTE2));
+end
 for i=1:Ny
     seq.addBlock(gx,adc);           % Read one line of k-space
     seq.addBlock(gy);               % Phase blip
