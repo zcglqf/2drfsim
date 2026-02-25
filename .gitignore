@@ -4,3 +4,4 @@ untitled*.m
 .vscode
 *.mat
 *.toml
+test_reports/

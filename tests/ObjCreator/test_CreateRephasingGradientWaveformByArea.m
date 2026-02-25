@@ -6,9 +6,9 @@ end
 function testReturnsCorrectCount(testCase)
     sys = makeTestSys();
 
-    g1 = CreateRephasingGradientWaveformByArea(10, sys, 0);
-    g2 = CreateRephasingGradientWaveformByArea([10 20], sys, 0);
-    g3 = CreateRephasingGradientWaveformByArea([10 20 30], sys, 0);
+    g1 = ObjCreator.CreateRephasingGradientWaveformByArea(10, sys, 0);
+    g2 = ObjCreator.CreateRephasingGradientWaveformByArea([10 20], sys, 0);
+    g3 = ObjCreator.CreateRephasingGradientWaveformByArea([10 20 30], sys, 0);
 
     verifyEqual(testCase, numel(g1), 1);
     verifyEqual(testCase, numel(g2), 2);
@@ -20,7 +20,7 @@ function testRejectsInvalidLength(testCase)
 
     didThrow = false;
     try
-        CreateRephasingGradientWaveformByArea([], sys, 0);
+        ObjCreator.CreateRephasingGradientWaveformByArea([], sys, 0);
     catch
         didThrow = true;
     end
@@ -31,7 +31,7 @@ function testRasterization(testCase)
     sys = makeTestSys();
 
     areas = [100 50 25];
-    grads = CreateRephasingGradientWaveformByArea(areas, sys, 0);
+    grads = ObjCreator.CreateRephasingGradientWaveformByArea(areas, sys, 0);
 
     % Check rise/flat are multiples of gradRasterTime
     for i = 1:numel(grads)
@@ -49,7 +49,7 @@ function testTriangleBranchSlope0(testCase)
     Acrit = (sys.maxGrad^2) / sys.maxSlew;
     areas = 0.1 * Acrit; % definitely triangle
 
-    grads = CreateRephasingGradientWaveformByArea(areas, sys, 0);
+    grads = ObjCreator.CreateRephasingGradientWaveformByArea(areas, sys, 0);
 
     % In triangle branch, FlatDur should be 0 (after rasterization it should stay 0)
     verifyEqual(testCase, grads{1}.flatTime, 0);
@@ -68,7 +68,7 @@ function testFixedSlopeNoFlat(testCase)
     % Pick area such that area/slope < maxGrad so FlatDur=0
     areas = 0.5 * sys.maxGrad * slope;
 
-    grads = CreateRephasingGradientWaveformByArea(areas, sys, slope);
+    grads = ObjCreator.CreateRephasingGradientWaveformByArea(areas, sys, slope);
 
     verifyEqual(testCase, grads{1}.riseTime, ceil(slope/sys.gradRasterTime)*sys.gradRasterTime);
     verifyEqual(testCase, grads{1}.flatTime, 0);
@@ -84,7 +84,7 @@ function testFixedSlopeWithFlat(testCase)
     % Pick area such that area/slope >= maxGrad so FlatDur>0
     areas = 2.0 * sys.maxGrad * slope; % forces FlatDur positive
 
-    grads = CreateRephasingGradientWaveformByArea(areas, sys, slope);
+    grads = ObjCreator.CreateRephasingGradientWaveformByArea(areas, sys, slope);
 
     verifyGreaterThan(testCase, grads{1}.flatTime, 0);
 
@@ -102,7 +102,7 @@ function testLargeAreaSlope0HitsTrapezoidBranch(testCase)
 
     didThrow = false;
     try
-        grads = CreateRephasingGradientWaveformByArea(areas, sys, 0);
+        grads = ObjCreator.CreateRephasingGradientWaveformByArea(areas, sys, 0);
     catch ME
         didThrow = true;
         % Helpful message if your current typo triggers:
@@ -113,7 +113,7 @@ function testLargeAreaSlope0HitsTrapezoidBranch(testCase)
         'Function threw an error in slope==0 trapezoid branch. Fix sys.sys.maxGrad typo.');
 
     % After you fix the typo, you can also assert flatTime > 0
-    grads = CreateRephasingGradientWaveformByArea(areas, sys, 0);
+    grads = ObjCreator.CreateRephasingGradientWaveformByArea(areas, sys, 0);
     verifyGreaterThan(testCase, grads{1}.flatTime, 0);
 end
 

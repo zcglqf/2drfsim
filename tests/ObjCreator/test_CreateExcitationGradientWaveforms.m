@@ -8,7 +8,7 @@ function testShapesAndBasicFields(testCase)
     kstart = [-200; 50; 10].';
     kend   = [ 300; -20; 40].';
 
-    [gLead, gExci, gTail] = CalcExcitationGradientWaveforms(kstart, kend, sys);
+    [gLead, gExci, gTail] = ObjCreator.CreateExcitationGradientWaveforms(kstart, kend, sys);
 
     verifyEqual(testCase, numel(gLead), 3);
     verifyEqual(testCase, numel(gExci), 3);
@@ -40,7 +40,7 @@ function testExcitationAreaMatchesKstride(testCase)
     kstart = [-100, 200, -50];
     kend   = [ 400,  20,  10];
 
-    [~, gExci, ~] = CalcExcitationGradientWaveforms(kstart, kend, sys);
+    [~, gExci, ~] = ObjCreator.CreateExcitationGradientWaveforms(kstart, kend, sys);
 
     kstride = kend - kstart;
 
@@ -74,7 +74,7 @@ function testLeadAndTailAreasMatchReturnedDurations(testCase)
     kstart = [-120, 10, 0];
     kend   = [  80, 30, -40];
 
-    [gLead, gExci, gTail] = CalcExcitationGradientWaveforms(kstart, kend, sys);
+    [gLead, gExci, gTail] = ObjCreator.CreateExcitationGradientWaveforms(kstart, kend, sys);
 
     kstride = kend - kstart;
 
