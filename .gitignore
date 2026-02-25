@@ -1,3 +1,6 @@
 *.asv
 untitled*.m
 *.seq
+.vscode
+*.mat
+*.toml

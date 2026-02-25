@@ -1,4 +1,4 @@
-function tests = test_CalcExcitationGradientWaveforms
+function tests = test_CreateExcitationGradientWaveforms
 tests = functiontests(localfunctions);
 end
 

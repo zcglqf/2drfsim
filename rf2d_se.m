@@ -465,8 +465,8 @@ preTime=8e-4;
 % gzReph = mr.makeTrapezoid('z',sys,'Area',-gz.area/2,'Duration',preTime);
 %gyPre = mr.makeTrapezoid('y',sys,'Area',-Ny/2*deltak,'Duration',preTime);
 % we need no minus for in-plane prephasers because of the spin-echo (position reflection in k-space)
-gxPre = mr.makeTrapezoid('x',sys,'Area',gx.area/2+deltak/2,'Duration',preTime);
-gyPre = mr.makeTrapezoid('y',sys,'Area',Ny/2*deltak,'Duration',preTime);
+gxPre = mr.makeTrapezoid('x',sys,'Area',-gx.area/2 + deltak,'Duration',preTime);
+gyPre = mr.makeTrapezoid('y',sys,'Area',-Ny/2*deltak,'Duration',preTime);
 
 % Phase blip in shortest possible time
 dur = ceil(2*sqrt(deltak/sys.maxSlew)/10e-6)*10e-6;
@@ -485,8 +485,8 @@ durationToCenter = (Ny/2+0.5)*mr.calcDuration(gx) + Ny/2*mr.calcDuration(gy); % 
 rf180centerInclDelay=rf180.delay + mr.calcRfCenter(rf180);
 exciFinTime = round(exciFinTime / sys.gradRasterTime) * sys.gradRasterTime;
 kspCenTime = round(kspCenTime / sys.gradRasterTime) * sys.gradRasterTime;
-minTE1 = (exciFinTime - kspCenTime) + mr.calcDuration(gxPre) + mr.calcDuration(gzSpoil) + (rf180centerInclDelay);
-minTE2 = (rf180centerInclDelay) +  mr.calcDuration(gzSpoil) + durationToCenter;
+minTE1 = (exciFinTime - kspCenTime)  + mr.calcDuration(gzSpoil) + (rf180centerInclDelay);
+minTE2 = (rf180centerInclDelay) +  mr.calcDuration(gzSpoil) + durationToCenter + mr.calcDuration(gxPre);
 minTEHalf = max(minTE1, minTE2);
 minTEHalf = round(minTEHalf / sys.gradRasterTime) * sys.gradRasterTime;
 % Calculate delay time %% MZ: I thisk this is very wrong!
@@ -505,7 +505,6 @@ delayTE2 = round(delayTE2 / sys.gradRasterTime) * sys.gradRasterTime;
 
 % Define sequence blocks
 % seq.addBlock(rf,gz);
-seq.addBlock(gxPre,gyPre); 
 if delayTE1 > sys.gradRasterTime
     seq.addBlock(mr.makeDelay(delayTE1));
 end
@@ -515,6 +514,7 @@ seq.addBlock(gzSpoil);
 if delayTE2 > sys.gradRasterTime
     seq.addBlock(mr.makeDelay(delayTE2));
 end
+seq.addBlock(gxPre,gyPre); 
 for i=1:Ny
     seq.addBlock(gx,adc);           % Read one line of k-space
     seq.addBlock(gy);               % Phase blip

@@ -6,15 +6,15 @@ import numpy as np
 # Folder where sim.py is located
 HERE = Path(__file__).resolve().parent
 
-seq_path = HERE / "epi_se.seq"   # or put it in a subfolder: HERE / "seq" / "se_epi.seq"
+seq_path = HERE.parent / "epi_gre.seq"   # or put it in a subfolder: HERE / "seq" / "se_epi.seq"
 print("seq_path:", seq_path)
 print("exists:", seq_path.exists())
 
 # That's it - automatic phantom download and simulation!
 signal, ktraj_adc = mr0.util.simulate(str(seq_path))
 
-Nx = 96   # set to your ADC samples per readout
-Ny = 96   # number of lines
+Nx = 32   # set to your ADC samples per readout
+Ny = 32   # number of lines
 
 sig = np.asarray(signal).reshape(Ny, Nx)
 
