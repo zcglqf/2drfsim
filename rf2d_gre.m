@@ -305,7 +305,7 @@ Nsamp = 1e4;
 % achieve it.
 diffLines = squeeze(endPoints(:,2,:) - endPoints(:,1,:));  % 2xN
 sumDiff = sum(diffLines, 2);  
-[~,dummyExci,~] = CreateExcitationGradientWaveforms([0,0]', sumDiff, sys);
+[~,dummyExci,~] = ObjCreator.CreateExcitationGradientWaveforms([0,0]', sumDiff, sys);
 dummytotflatdur = dummyExci{1}.flatTime;
 
 % estimated total rf dur. The length of each line is different. We scale
@@ -387,7 +387,7 @@ for li = 1:nLines
          kstart = squeeze(endPoints(:,1,li));
          kend   = squeeze(endPoints(:,2,li));
      end
-     [gLead, gExci, gTail] = CreateExcitationGradientWaveforms(kstart, kend, sysg);
+     [gLead, gExci, gTail] = ObjCreator.CreateExcitationGradientWaveforms(kstart, kend, sysg);
 
     % --- Build RF waveform along this k-line by sampling RfVal2D ---
     nsamples = length(RfShapes{li});
@@ -402,7 +402,7 @@ for li = 1:nLines
         % Compute areas in 1/m from trapezoids (full area)
         totalRephArea = cellfun(@(s) s.area, prevTail) + cellfun(@(s) s.area, gLead);
         % If you have CalcRephasingGradientWaveformByArea (expects 1/m), use it:
-        gReph = CreateRephasingGradientWaveformByArea(totalRephArea, sys, 0); % slope=0 -> auto        
+        gReph = ObjCreator.CreateRephasingGradientWaveformByArea(totalRephArea, sys, 0); % slope=0 -> auto        
         gReph{1}.channel = 'x';
         gReph{2}.channel = 'y';
         % Add rephasing as its own block
