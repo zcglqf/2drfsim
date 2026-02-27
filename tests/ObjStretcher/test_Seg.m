@@ -149,7 +149,8 @@ classdef test_Seg < matlab.unittest.TestCase
                 'ObjStretcher:Seg:rfAmplitudeOverFlow');
         end
 
-        % ADC segment, its duration much be equal to ADC dwell time
+        % ADC segment, its duration must be equal to adcRasterTime time.
+        % this test case also implicitly test adc dwell time is multiple of adc raster time. 
         function testValidateAgainstSystem_ADCAligned(testCase)
             sys = mr.opts('MaxGrad', 40, 'GradUnit', 'mT/m', ...
                 'MaxSlew', 120, 'SlewUnit', 'T/m/s', ...
@@ -158,7 +159,7 @@ classdef test_Seg < matlab.unittest.TestCase
             sys.maxB1 = 20e-6 * sys.gamma;
             dwell = 2.5e-6;
 
-            s = ObjStretcher.Seg('tStart', 0, 'dur', dwell, ...
+            s = ObjStretcher.Seg('tStart', 0, 'dur', sys.adcRasterTime, ...
                 'rf', 0, 'gx', 0, 'gy', 0, 'gz', 0, 'adc', 1);
 
             s.validateAgainstSystem(sys, dwell, 1e-12);
@@ -218,7 +219,7 @@ classdef test_Seg < matlab.unittest.TestCase
 
             dwell = 1e-6;
 
-            s = ObjStretcher.Seg('tStart', 0, 'dur', dwell, ...
+            s = ObjStretcher.Seg('tStart', 0, 'dur', sys.adcRasterTime, ...
                 'rf', 0, 'gx', 0, 'gy', 0, 'gz', 0, 'adc', 1);
 
             % Should not throw (rf=0, adc=1)
@@ -236,7 +237,7 @@ classdef test_Seg < matlab.unittest.TestCase
 
             dwell = 2.5e-6;               % 25 * 0.1 us -> integer multiple
 
-            s = ObjStretcher.Seg('tStart', 0, 'dur', dwell, ...
+            s = ObjStretcher.Seg('tStart', 0, 'dur', sys.adcRasterTime, ...
                 'rf', 0, 'gx', 0, 'gy', 0, 'gz', 0, 'adc', 1);
 
             % Should NOT throw
