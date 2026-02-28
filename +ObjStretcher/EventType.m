@@ -1,11 +1,11 @@
 classdef EventType < uint8
     enumeration
         RF          (0)
-        GRADIENTM   (3)
-        GRADIENTP   (4)
-        GRADIENTS   (5)
-        ACQ         (6)
-        EVENTMAX    (7)
+        GX          (1)
+        GY          (2)
+        GZ          (3)
+        ACQ         (4)
+        EVENTMAX    (5)
     end
 
     methods

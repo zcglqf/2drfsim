@@ -1,44 +1,57 @@
-function results = run_all_tests()
-%RUN_ALL_TESTS Run all unit tests in this repository.
+function results = run_all_tests(testFile)
+%RUN_ALL_TESTS Run all unit tests, or run a single specified test file.
+%
+% Usage:
+%   run_all_tests()                                   % run all tests under ./tests
+%   run_all_tests("tests/ObjStretcher/test_Seg.m")    % run one test file
+%   run_all_tests("test_EventMetaData.m")             % run one test file (searched under ./tests)
+%
+% Returns:
+%   results : matlab.unittest.TestResult array
 
 repoRoot = fileparts(mfilename('fullpath'));
-
-% Make sure your package code is on the path (adjust if needed)
 addpath(genpath(repoRoot));
 
-% Prefer tests folder
 testsFolder = fullfile(repoRoot, "tests");
 
 import matlab.unittest.TestSuite
 import matlab.unittest.TestRunner
 import matlab.unittest.plugins.TestReportPlugin
-import matlab.unittest.plugins.CodeCoveragePlugin
 
 % Build suite
-if isfolder(testsFolder)
-    suite = TestSuite.fromFolder(testsFolder, "IncludingSubfolders", true);
+if nargin < 1 || isempty(testFile)
+    if isfolder(testsFolder)
+        suite = TestSuite.fromFolder(testsFolder, "IncludingSubfolders", true);
+    else
+        suite = TestSuite.fromFolder(repoRoot, "IncludingSubfolders", true);
+    end
 else
-    % Fallback: run any tests discoverable on path
-    suite = TestSuite.fromFolder(repoRoot, "IncludingSubfolders", true);
+    tf = string(testFile);
+
+    % If they pass only a filename, search under tests/
+    if ~isfile(tf)
+        candidates = dir(fullfile(testsFolder, "**", tf));
+        if isempty(candidates)
+            error("run_all_tests:TestFileNotFound", ...
+                "Test file not found: %s", tf);
+        end
+        tf = fullfile(candidates(1).folder, candidates(1).name);
+    end
+
+    suite = TestSuite.fromFile(char(tf));
 end
 
-% Runner + report
+% Runner + HTML report
 runner = TestRunner.withTextOutput("Verbosity", 2);
 
-% Optional: HTML report
 reportsDir = fullfile(repoRoot, "test_reports");
 if ~isfolder(reportsDir), mkdir(reportsDir); end
 runner.addPlugin(TestReportPlugin.producingHTML(reportsDir));
 
-% Optional: coverage for your package folder(s)
-pkgFolder = fullfile(repoRoot, "+mypkg");  % change to your package folder
-if isfolder(pkgFolder)
-    runner.addPlugin(CodeCoveragePlugin.forFolder(pkgFolder));
-end
-
 % Run
 results = runner.run(suite);
 
-% Make CI-friendly: fail the script if any test fails
+% Fail if any test failed
 assert(all([results.Passed]), "Some unit tests failed.");
+
 end
