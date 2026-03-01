@@ -2,7 +2,7 @@
 untitled*.m
 *.seq
 # but keep this file.
-!tests/ObjStretcher/res/epi.seq
+!tests/Seq/res/epi.seq
 .vscode
 *.mat
 *.toml

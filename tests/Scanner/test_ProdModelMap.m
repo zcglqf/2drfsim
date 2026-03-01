@@ -112,8 +112,11 @@ classdef test_ProdModelMap < matlab.unittest.TestCase
 
             sys.baseRasterTime = 1e-7;
 
-            testCase.verifyWarningFree(@() testCase.map.add("Test.Valid", sys));
+            % error due to missing filed
+            testCase.verifyError(@() testCase.map.add("Test.Valid", sys), "Scanner:MissingSysField");
 
+            sys.maxB1 = 20e-6 * sys.gamma;
+            testCase.verifyWarningFree(@() testCase.map.add("Test.Valid", sys));
             sys2 = testCase.map.get("test.valid"); % case-insensitive key
             testCase.verifyEqual(sys2.baseRasterTime, sys.baseRasterTime);
             testCase.verifyEqual(sys2.rfRasterTime, sys.rfRasterTime);

@@ -28,6 +28,7 @@ classdef ProdModelMap < handle
                 'gradRasterTime', 1e-5, ...
                 'adcRasterTime', 1e-7);
             sys.baseRasterTime = 1e-7;   % make sure all raster times are integer multiple of baseRaster.
+            sys.maxB1 = 20e-6 * sys.gamma;
             obj.add("any", sys);
 
             % Philips Ingenia 1.5T Ambition, reuse baseline for now
@@ -41,6 +42,7 @@ classdef ProdModelMap < handle
                 'gradRasterTime', 1e-5, ...
                 'adcRasterTime', 1e-7);
             sys.baseRasterTime = 1e-7;   % make sure all raster times are integer multiple of baseRaster.
+            sys.maxB1 = 20e-6 * sys.gamma;
             obj.add("Philips.Ingenia1.5T.Ambition", sys);
 
             % Siemens Prisma 3.0T
@@ -54,6 +56,7 @@ classdef ProdModelMap < handle
                 'gradRasterTime', 10e-6, ...
                 'adcRasterTime', 0.1e-6);
             sys.baseRasterTime = 1e-7;
+            sys.maxB1 = 20e-6 * sys.gamma;
             obj.add("Siemens.Prisma3.0T", sys);
 
             % GE Signa 3.0T Hero
@@ -67,6 +70,7 @@ classdef ProdModelMap < handle
                 'gradRasterTime', 10e-6, ...
                 'adcRasterTime', 0.1e-6);
             sys.baseRasterTime = 1e-7;
+            sys.maxB1 = 20e-6 * sys.gamma;
             obj.add("GE.Signa3.0T.Hero", sys);
         end
     end
@@ -75,7 +79,7 @@ classdef ProdModelMap < handle
         function add(obj, prodId, sys)
             % Validate sys.baseRasterTime and raster multiples
             obj.validateSysRaster(sys, prodId);
-
+            obj.validateSysFields(sys, prodId);
             key = obj.normalizeKey(prodId);
             obj.map(key) = sys;
         end
@@ -137,6 +141,45 @@ classdef ProdModelMap < handle
             obj.assertMultiple(sys.rfRasterTime, base, "rfRasterTime", prodId);
             obj.assertMultiple(sys.gradRasterTime, base, "gradRasterTime", prodId);
             obj.assertMultiple(sys.adcRasterTime, base, "adcRasterTime", prodId);
+        end
+
+        function validateSysFields(obj, sys, prodId)
+
+            if ~isstruct(sys)
+                error("Scanner:BadSys", ...
+                    "sys must be a struct for %s.", string(prodId));
+            end
+
+            requiredFields = [ ...
+                "maxGrad", ...
+                "maxSlew", ...
+                "rfRingdownTime", ...
+                "rfDeadTime", ...
+                "adcDeadTime", ...
+                "rfRasterTime", ...
+                "gradRasterTime", ...
+                "adcRasterTime", ...
+                "baseRasterTime", ...
+                "maxB1" ];
+
+            for i = 1:numel(requiredFields)
+                f = requiredFields(i);
+
+                if ~isfield(sys, f)
+                    error("Scanner:MissingSysField", ...
+                        "sys.%s missing for product %s.", f, string(prodId));
+                end
+
+                if isempty(sys.(f))
+                    error("Scanner:EmptySysField", ...
+                        "sys.%s is empty for product %s.", f, string(prodId));
+                end
+
+                if ~isfinite(double(sys.(f)))
+                    error("Scanner:InvalidSysField", ...
+                        "sys.%s must be finite for product %s.", f, string(prodId));
+                end
+            end
         end
 
         function assertMultiple(obj, value, base, fieldName, prodId)
